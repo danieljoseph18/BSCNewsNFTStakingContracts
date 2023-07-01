@@ -217,4 +217,46 @@ contract NFTStakingTest is Test {
         // Compare the expected rewards to actual rewards
         assertEq(staking.calculateRewards(USER), expectedRewards);
     }
+
+    // Check a user can stake after the first staking period ends and the second begins
+    function testUserCanStakeTokenAfterTheFirstPeriodEndsAndSecondBegins() public startStakingPeriodAndMintNFT {
+        // Advance time to the end of the first staking period
+        vm.warp(block.timestamp + STAKING_PERIOD + randomInterval);
+        vm.roll(block.number + 1);
+
+        // Start the second staking period
+        vm.startPrank(OWNER);
+        MockToken(rewardToken).transfer(address(staking), STAKING_AMOUNT);
+        staking.startStakingPeriod(STAKING_AMOUNT, STAKING_PERIOD);
+        vm.stopPrank();
+
+        // Stake tokens in the second staking period
+        vm.startPrank(USER);
+        MockNft(nftCollection).approve(address(staking), 0);
+        uint256[] memory tokensToStake = new uint256[](1);
+        tokensToStake[0] = 0;
+        staking.stake(tokensToStake);
+        vm.stopPrank();
+
+        // Check the stake was successful
+        assertEq(MockNft(nftCollection).balanceOf(USER), 0);
+        assertEq(MockNft(nftCollection).balanceOf(address(staking)), 1);
+        assertEq(staking.stakedAssets(0), USER);
+    }
+
+    // Check a user cant stake after the first staking period ends
+    function testUserCantStakeAfterTheFirstPeriodEnds() public startStakingPeriodAndMintNFT {
+        // Advance time to the end of the first staking period
+        vm.warp(block.timestamp + STAKING_PERIOD + randomInterval);
+        vm.roll(block.number + 1);
+
+        // Try to stake tokens after the first staking period ends
+        vm.startPrank(USER);
+        MockNft(nftCollection).approve(address(staking), 0);
+        uint256[] memory tokensToStake = new uint256[](1);
+        tokensToStake[0] = 0;
+        vm.expectRevert();
+        staking.stake(tokensToStake);
+        vm.stopPrank();
+    }
 }

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.18;
+pragma solidity 0.8.18;
 
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
@@ -14,8 +14,8 @@ contract BSCNewsNFTStaking is ERC721Holder, ReentrancyGuard, Ownable {
 
     using SafeERC20 for IERC20;
 
-    IERC20 public rewardToken;
-    IERC721 public nftCollection;
+    IERC20 public immutable rewardToken;
+    IERC721 public immutable nftCollection;
 
     enum Status {
         OPEN,
@@ -41,7 +41,7 @@ contract BSCNewsNFTStaking is ERC721Holder, ReentrancyGuard, Ownable {
 
     /// @param _nftCollection the address of the ERC721 Contract
     /// @param _rewardToken the address of the ERC20 token used for rewards
-    constructor(address _nftCollection, address _rewardToken) {
+    constructor(address _nftCollection, address _rewardToken) payable {
         nftCollection = IERC721(_nftCollection);
         rewardToken = IERC20(_rewardToken);
     }
@@ -51,40 +51,44 @@ contract BSCNewsNFTStaking is ERC721Holder, ReentrancyGuard, Ownable {
     /// @dev the Token IDs have to be prevoiusly approved for transfer in the
     /// ERC721 contract with the address of this contract
     function stake(uint256[] memory tokenIds) external updateReward(msg.sender) {
-        require(tokenIds.length != 0, "Staking: No tokenIds provided");
+        uint256 amount = tokenIds.length;
+        require(amount != 0, "Staking: No tokenIds provided");
         if (currentStakingStatus != Status.OPEN) {
             revert StakingClosed();
         }
 
-        uint256 amount = tokenIds.length;
-        for (uint256 i = 0; i < amount; i += 1) {
-            nftCollection.safeTransferFrom(msg.sender, address(this), tokenIds[i]);
+        for (uint256 i = 0; i < amount; ++i) {
+            uint256 tokenId = tokenIds[i];
+            uint256 tokenLen = tokensStaked[msg.sender].length;
+            nftCollection.safeTransferFrom(msg.sender, address(this), tokenId);
 
-            stakedAssets[tokenIds[i]] = msg.sender;
-            tokensStaked[msg.sender].push(tokenIds[i]);
-            tokenIdToIndex[tokenIds[i]] = tokensStaked[msg.sender].length - 1;
+            stakedAssets[tokenId] = msg.sender;
+            tokensStaked[msg.sender].push(tokenId);
+            tokenIdToIndex[tokenId] = tokenLen - 1;
         }
-        totalStakedSupply += amount;
+        totalStakedSupply = totalStakedSupply + amount;
 
         emit Staked(msg.sender, tokenIds);
     }
 
     /// @notice function called by the user to Withdraw NFTs from staking
     /// @param tokenIds array of Token IDs of the NFTs to be withdrawn
-    function withdraw(uint256[] memory tokenIds) public nonReentrant updateReward(msg.sender) {
-        require(tokenIds.length != 0, "Staking: No tokenIds provided");
-
+    function withdraw(uint256[] memory tokenIds) external nonReentrant updateReward(msg.sender) {
         uint256 amount = tokenIds.length;
-        for (uint256 i = 0; i < amount; i += 1) {
-            require(stakedAssets[tokenIds[i]] == msg.sender, "Staking: Not the staker of the token");
+        require(amount != 0, "Staking: No tokenIds provided");
 
-            nftCollection.safeTransferFrom(address(this), msg.sender, tokenIds[i]);
+        for (uint256 i = 0; i < amount; ++i) {
+            uint256 tokenId = tokenIds[i];
+            require(stakedAssets[tokenId] == msg.sender, "Staking: Not the staker of the token");
 
-            stakedAssets[tokenIds[i]] = address(0);
+            nftCollection.safeTransferFrom(address(this), msg.sender, tokenId);
+
+            stakedAssets[tokenId] = address(0);
 
             uint256[] storage userTokens = tokensStaked[msg.sender];
 
-            uint256 index = tokenIdToIndex[tokenIds[i]];
+            uint256 index = tokenIdToIndex[tokenId];
+
             uint256 lastTokenIdIndex = userTokens.length - 1;
             if (index != lastTokenIdIndex) {
                 uint256 lastTokenId = userTokens[lastTokenIdIndex];
@@ -92,8 +96,9 @@ contract BSCNewsNFTStaking is ERC721Holder, ReentrancyGuard, Ownable {
                 tokenIdToIndex[lastTokenId] = index;
             }
             userTokens.pop();
+            delete tokenIdToIndex[tokenId];
         }
-        totalStakedSupply -= amount;
+        totalStakedSupply = totalStakedSupply - amount;
 
         emit Withdrawn(msg.sender, tokenIds);
     }
@@ -101,7 +106,8 @@ contract BSCNewsNFTStaking is ERC721Holder, ReentrancyGuard, Ownable {
     /// @notice function called by the user to claim his accumulated rewards
     function claimRewards() public nonReentrant updateReward(msg.sender) {
         uint256 reward = rewards[msg.sender];
-        if (reward > 0) {
+        require(rewardToken.balanceOf(address(this)) >= reward, "Staking: Not enough balance");
+        if (reward != 0) {
             rewards[msg.sender] = 0;
 
             rewardToken.safeTransfer(msg.sender, reward);
@@ -113,9 +119,37 @@ contract BSCNewsNFTStaking is ERC721Holder, ReentrancyGuard, Ownable {
     }
 
     /// @notice function called by the user to withdraw all NFTs and claim the rewards in one transaction
-    function withdrawAll() external {
-        withdraw(tokensStaked[msg.sender]);
+    function withdrawAll() external nonReentrant {
+        uint256[] memory toWithdraw = tokensStaked[msg.sender];
+        uint256 amount = toWithdraw.length;
+        require(amount != 0, "Staking: No tokens staked");
+
+        for (uint256 i = 0; i < amount; i += 1) {
+            uint256 tokenId = toWithdraw[i];
+            // Redundant check??
+            require(stakedAssets[tokenId] == msg.sender, "Staking: Not the staker of the token");
+
+            nftCollection.safeTransferFrom(address(this), msg.sender, tokenId);
+
+            stakedAssets[tokenId] = address(0);
+
+            uint256[] storage userTokens = tokensStaked[msg.sender];
+
+            uint256 index = tokenIdToIndex[tokenId];
+
+            uint256 lastTokenIdIndex = userTokens.length - 1;
+            if (index != lastTokenIdIndex) {
+                uint256 lastTokenId = userTokens[lastTokenIdIndex];
+                userTokens[index] = lastTokenId;
+                tokenIdToIndex[lastTokenId] = index;
+            }
+            userTokens.pop();
+            delete tokenIdToIndex[tokenId];
+        }
+        totalStakedSupply -= amount;
         claimRewards();
+
+        emit Withdrawn(msg.sender, toWithdraw);
     }
 
     /// @notice function useful for Front End to see the stake and rewards for users
@@ -145,24 +179,22 @@ contract BSCNewsNFTStaking is ERC721Holder, ReentrancyGuard, Ownable {
     /// @dev  the Staking Contract have to already own enough Rewards Tokens to distribute all the rewards,
     /// so make sure to send all the tokens to the contract before calling this function
     function startStakingPeriod(uint256 _amount, uint256 _duration) external onlyOwner {
-        require(_amount > 0, "Staking: Amount must be greater than 0");
-        require(_duration > 0, "Staking: Duration must be greater than 0");
-        require(
-            block.timestamp > periodFinish,
-            "Staking: Previous rewards period must be complete before changing the duration for the new period"
-        );
+        require(_amount != 0, "Staking: Amount must > 0");
+        require(_duration != 0, "Staking: Duration must > 0");
+        uint256 endOfPeriod = periodFinish;
+        require(block.timestamp > endOfPeriod, "Staking: Period not finished");
 
         rewardsDuration = _duration;
 
-        emit RewardsDurationUpdated(rewardsDuration);
+        emit RewardsDurationUpdated(_duration);
 
-        rewardRate = _amount / rewardsDuration;
+        rewardRate = _amount / _duration;
 
         uint256 balance = rewardToken.balanceOf(address(this));
-        require(rewardRate <= balance / rewardsDuration, "Staking: Provided reward too high");
+        require(rewardRate <= balance / _duration, "Staking: Reward too high");
 
         lastUpdateTime = block.timestamp;
-        periodFinish = block.timestamp + rewardsDuration;
+        periodFinish = block.timestamp + _duration;
         currentStakingStatus = Status.OPEN;
 
         emit RewardAdded(_amount);
@@ -177,11 +209,11 @@ contract BSCNewsNFTStaking is ERC721Holder, ReentrancyGuard, Ownable {
     /// @notice calculates the rewards per token for the current time whenever a new deposit/withdraw
     /// is made to keep track of the correct token distribution between stakers
     function rewardPerToken() public view returns (uint256) {
+        uint256 reward = rewardPerTokenStored;
         if (totalStakedSupply == 0) {
-            return rewardPerTokenStored;
+            return reward;
         }
-        return rewardPerTokenStored
-            + (((lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18) / totalStakedSupply);
+        return reward + (((lastTimeRewardApplicable() - lastUpdateTime) * rewardRate * 1e18) / totalStakedSupply);
     }
 
     /// @notice used to calculate the earned rewards for a user

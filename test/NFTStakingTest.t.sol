@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+// Audit: https://uploads-ssl.webflow.com/621a140a057f392845dfaef3/64bfe8907e8bb3ba7b86d887_SmartContract_Audit_BSCNewsNFT_v1.1.pdf
 pragma solidity ^0.8.18;
 
 import {Test, console} from "forge-std/Test.sol";

@@ -10,7 +10,6 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
 contract BSCNewsNFTStaking is ERC721Holder, ReentrancyGuard, Ownable {
     error StakingClosed();
-    error NoRewardsAvailable();
 
     using SafeERC20 for IERC20;
 
@@ -59,11 +58,11 @@ contract BSCNewsNFTStaking is ERC721Holder, ReentrancyGuard, Ownable {
 
         for (uint256 i = 0; i < amount; ++i) {
             uint256 tokenId = tokenIds[i];
+            tokensStaked[msg.sender].push(tokenId);
             uint256 tokenLen = tokensStaked[msg.sender].length;
             nftCollection.safeTransferFrom(msg.sender, address(this), tokenId);
 
             stakedAssets[tokenId] = msg.sender;
-            tokensStaked[msg.sender].push(tokenId);
             tokenIdToIndex[tokenId] = tokenLen - 1;
         }
         totalStakedSupply = totalStakedSupply + amount;
@@ -114,12 +113,12 @@ contract BSCNewsNFTStaking is ERC721Holder, ReentrancyGuard, Ownable {
 
             emit RewardPaid(msg.sender, reward);
         } else {
-            revert NoRewardsAvailable();
+            return;
         }
     }
 
     /// @notice function called by the user to withdraw all NFTs and claim the rewards in one transaction
-    function withdrawAll() external nonReentrant {
+    function withdrawAll() external {
         uint256[] memory toWithdraw = tokensStaked[msg.sender];
         uint256 amount = toWithdraw.length;
         require(amount != 0, "Staking: No tokens staked");

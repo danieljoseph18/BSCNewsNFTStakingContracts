@@ -45,6 +45,18 @@ contract BSCNewsNFTStaking is ERC721Holder, ReentrancyGuard, Ownable {
         rewardToken = IERC20(_rewardToken);
     }
 
+    /// @notice Function to recover wrongly sent tokens
+    /// @param _token the address of the ERC20 token to recover
+    /// @dev Staking period must be over if the tokens are reward tokens
+    function recoverTokens(address _token) external onlyOwner {
+        uint256 bal = IERC20(_token).balanceOf(address(this));
+        require(bal > 0, "Staking: No tokens to recover");
+        if (_token == address(rewardToken)) {
+            require(block.timestamp > periodFinish, "Staking: Period not finished");
+        }
+        IERC20(_token).safeTransfer(msg.sender, bal);
+    }
+
     /// @notice functon called by the users to Stake NFTs
     /// @param tokenIds array of Token IDs of the NFTs to be staked
     /// @dev the Token IDs have to be prevoiusly approved for transfer in the

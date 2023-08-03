@@ -260,4 +260,22 @@ contract NFTStakingTest is Test {
         staking.stake(tokensToStake);
         vm.stopPrank();
     }
+
+    function testRecovery() public {
+        vm.startPrank(OWNER);
+        MockToken(rewardToken).transfer(address(staking), STAKING_AMOUNT);
+        staking.startStakingPeriod(STAKING_AMOUNT, STAKING_PERIOD);
+        vm.stopPrank();
+        vm.warp(block.timestamp + 366 days);
+        vm.roll(block.number + 1);
+
+        uint256 balBeforeRecovery = MockToken(rewardToken).balanceOf(OWNER);
+
+        vm.prank(OWNER);
+        staking.recoverTokens(rewardToken);
+
+        uint256 balAfterRecovery = MockToken(rewardToken).balanceOf(OWNER);
+
+        assertEq(balAfterRecovery - balBeforeRecovery, STAKING_AMOUNT);
+    }
 }
